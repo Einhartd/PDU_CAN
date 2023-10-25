@@ -31,7 +31,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define PDU_ADD		0x0A
+#define DISCHARGE	0x05
+#define PRECHARGE	0x03
+#define OFF			0x00
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -45,14 +48,11 @@ CAN_HandleTypeDef hcan;
 /* USER CODE BEGIN PV */
 GPIO_TypeDef* GPIO_Port_List[4] = {SA_GPIO_Port, SB_GPIO_Port, SC_GPIO_Port, SD_GPIO_Port};
 uint16_t GPIO_Pin_List[4] = {SA_Pin, SB_Pin, SC_Pin, SD_Pin};
-uint8_t check_multi[4] = {0x01, 0x02, 0x04, 0x08};
-GPIO_PinState GPIO_State_List[4] = {GPIO_PIN_SET};
 
 CAN_RxHeaderTypeDef RxHeader;
 uint8_t RxData[8];
 
-int rel_flag = 0;
-int ready_rel = 0;
+int flag = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -102,28 +102,17 @@ void Off(){	//	SA = 0, SB = 0, SC = 0, SD = 0
 	HAL_GPIO_WritePin(GPIO_Port_List[3], GPIO_Pin_List[3], GPIO_PIN_SET);
 }
 
-void set_up_flag(){
-	if(rel_flag==0){
-		ready_rel=1;
-	}
-	else if(rel_flag==1){
-		ready_rel=1;
-	}
-}
-
 //	INTERRUPTS
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 	if(GPIO_Pin == B1_Pin){
-		set_up_flag();
+
 	}
 }
 
 
 void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan){		//Funkcja odbierająca dane z CAN
 	HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO1, &RxHeader, RxData);
-	if(RxHeader.StdId == 0x01){
-		set_up_flag();
-	}
+	flag = 1;
 }
 
 /* USER CODE END PFP */
@@ -172,26 +161,38 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  if (flag == 1){
+		  flag = 0;
+		  switch(RxHeader.StdId){
+		  case PDU_ADD:
+			  switch(RxData[0]){
+			  case DISCHARGE:
+				  Discharge();
+				  break;
+			  case PRECHARGE:
+				  Precharge();
+				  break;
+			  case OFF:
+				  Off();
+				  break;
+			  default:
+				  break;
+			  }
+			  break;
 
-	  if(ready_rel==1){
-		  if(rel_flag==0){
-			  Precharge();
-			  Discharge();
-			  ready_rel = 0;
-			  rel_flag=1;
+          default:
+			  break;
 		  }
-		  else{
-			  Off();
-			  ready_rel = 0;
-			  rel_flag=0;
-		  }
+	  }
+
+
+
 	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
-}
 
 /**
   * @brief System Clock Configuration

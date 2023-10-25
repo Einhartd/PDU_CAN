@@ -31,7 +31,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define PDU_ADD		0x0A
+#define DISCHARGE	0x05
+#define PRECHARGE	0x03
+#define OFF			0x00
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -46,7 +49,7 @@ CAN_HandleTypeDef hcan;
 CAN_TxHeaderTypeDef TxHeader;
 uint32_t TxMailbox;
 uint8_t TxData[8];
-uint8_t diodeState=0;
+uint8_t option = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -57,13 +60,24 @@ static void MX_CAN_Init(void);
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 	if(GPIO_Pin == B1_Pin){
-		if(diodeState==0){
-			TxData[0] = 0x05;
-			diodeState=1;
-		}
-		else if (diodeState==1){
-			TxData[0] = 0x0A;
-			diodeState=0;
+
+/*TESTOWE WYSYLANIE WIADOMOSCI TODO*/
+		switch(option){
+		case 0:
+			option = 1;
+			TxData[0] = DISCHARGE;
+			TxHeader.StdId = PDU_ADD;
+			break;
+		case 1:
+			option = 2;
+			TxData[0] = PRECHARGE;
+			TxHeader.StdId = PDU_ADD;
+			break;
+		case 2:
+			option = 0;
+			TxData[0] = OFF;
+			TxHeader.StdId = PDU_ADD;
+			break;
 		}
 		HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
 	}
