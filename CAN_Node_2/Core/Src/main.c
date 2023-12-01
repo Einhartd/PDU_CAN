@@ -21,7 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include <math.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,7 +32,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define PDU_ADD		0x0A
+#define PDU_ADD		0x01
 #define DISCHARGE	0x05
 #define PRECHARGE	0x03
 #define OFF			0x00
@@ -45,9 +46,17 @@
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan;
 
+UART_HandleTypeDef huart2;
+
 /* USER CODE BEGIN PV */
 GPIO_TypeDef* GPIO_Port_List[4] = {SA_GPIO_Port, SB_GPIO_Port, SC_GPIO_Port, SD_GPIO_Port};
 uint16_t GPIO_Pin_List[4] = {SA_Pin, SB_Pin, SC_Pin, SD_Pin};
+
+GPIO_TypeDef* Feedback_Port_List[4] = {FA_GPIO_Port, FB_GPIO_Port, FC_GPIO_Port, FD_GPIO_Port};
+uint16_t Feedback_Pin_List[4] = {FA_Pin, FB_Pin, FC_Pin, FD_Pin};
+int Feedback_State[4] = {0};
+uint8_t Feedback_Bit = 0;
+int Error_Flag = 1;
 
 CAN_RxHeaderTypeDef RxHeader;
 uint8_t RxData[8];
@@ -59,58 +68,100 @@ int flag = 0;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_CAN_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
+
+//	wyswietlanie tekstu
+int __io_putchar(int ch)
+{
+    if (ch == '\n') {
+        uint8_t ch2 = '\r';
+        HAL_UART_Transmit(&huart2, &ch2, 1, HAL_MAX_DELAY);
+    }
+
+    HAL_UART_Transmit(&huart2, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
+    return 1;
+}
+
+
+/* Funkcja czyta wartosci outputow dla poszczegolnych Feedbackow i zapisuje w liscie.
+ * Oprocz tego przelicza ja na hex i porownuje z ta otrzymana w ramce
+ * (brak rownosci oznacza krytyczny blad i PDU powinno zostac odlaczone TODO ).*/
+int ReadFeedback(){
+	int result;
+	GPIO_PinState Feedback_Status;
+	double Bit_Place = 0.0;
+	Feedback_Bit = 0;
+	int Feedback_Length = sizeof(Feedback_State) / sizeof(Feedback_State[0]);
+	for(int i=0; i<Feedback_Length; i++){
+		Feedback_Status = HAL_GPIO_ReadPin(Feedback_Port_List[i], Feedback_Pin_List[i]);
+		(Feedback_Status==GPIO_PIN_SET) ? (Feedback_State[i]=1) : (Feedback_State[i]=0);
+		Bit_Place = pow(2.0, (double)i);
+		Feedback_Bit += Feedback_State[i] * (int)Bit_Place;
+	}
+	(RxData[0]==Feedback_Bit) ? (result=0) : (result=-1);
+	return result;
+}
+
+//	TODO
+void CriticalFailure(){
+	printf("TODO");
+}
+
+
 
 void Precharge(){	//	SA = 1, SB = 1, SC = 0 , SD = 0
 	//	SA = 1
-	HAL_GPIO_WritePin(GPIO_Port_List[0], GPIO_Pin_List[0], GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIO_Port_List[0], GPIO_Pin_List[0], GPIO_PIN_SET);
 	HAL_Delay(500);
 	//	SB = 1
-	HAL_GPIO_WritePin(GPIO_Port_List[1], GPIO_Pin_List[1], GPIO_PIN_RESET);
-	//	Delay do zastapienia mierzeniem napiecia na falowniku
-	HAL_Delay(10000);
+	HAL_GPIO_WritePin(GPIO_Port_List[1], GPIO_Pin_List[1], GPIO_PIN_SET);
+	HAL_Delay(500);
 	//	SC = 0
-	HAL_GPIO_WritePin(GPIO_Port_List[2], GPIO_Pin_List[2], GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIO_Port_List[2], GPIO_Pin_List[2], GPIO_PIN_RESET);
 	//	SD = 0
-	HAL_GPIO_WritePin(GPIO_Port_List[3], GPIO_Pin_List[3], GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIO_Port_List[3], GPIO_Pin_List[3], GPIO_PIN_RESET);
 }
 
 void Discharge(){	//	SA = 1, SB = 0, SC = 1 , SD = 0
 	//	SA = 1
-	HAL_GPIO_WritePin(GPIO_Port_List[0], GPIO_Pin_List[0], GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIO_Port_List[0], GPIO_Pin_List[0], GPIO_PIN_SET);
 	HAL_Delay(500);
 	//	SB = 0
-	HAL_GPIO_WritePin(GPIO_Port_List[1], GPIO_Pin_List[1], GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIO_Port_List[1], GPIO_Pin_List[1], GPIO_PIN_RESET);
 	HAL_Delay(500);
 	//	SC = 1
-	HAL_GPIO_WritePin(GPIO_Port_List[2], GPIO_Pin_List[2], GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIO_Port_List[2], GPIO_Pin_List[2], GPIO_PIN_SET);
 	HAL_Delay(500);
 	//	SD = 0
-	HAL_GPIO_WritePin(GPIO_Port_List[3], GPIO_Pin_List[3], GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIO_Port_List[3], GPIO_Pin_List[3], GPIO_PIN_RESET);
 	HAL_Delay(500);
 }
 
 void Off(){	//	SA = 0, SB = 0, SC = 0, SD = 0
 	//	SC = 0
-	HAL_GPIO_WritePin(GPIO_Port_List[2], GPIO_Pin_List[2], GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIO_Port_List[2], GPIO_Pin_List[2], GPIO_PIN_RESET);
 	HAL_Delay(500);
 	//	SA = 0
-	HAL_GPIO_WritePin(GPIO_Port_List[0], GPIO_Pin_List[0], GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIO_Port_List[0], GPIO_Pin_List[0], GPIO_PIN_RESET);
 	//	SB = 0
-	HAL_GPIO_WritePin(GPIO_Port_List[1], GPIO_Pin_List[1], GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIO_Port_List[1], GPIO_Pin_List[1], GPIO_PIN_RESET);
 	//	SD = 0
-	HAL_GPIO_WritePin(GPIO_Port_List[3], GPIO_Pin_List[3], GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIO_Port_List[3], GPIO_Pin_List[3], GPIO_PIN_RESET);
 }
 
 //	INTERRUPTS
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 	if(GPIO_Pin == B1_Pin){
-
+		printf("FA: %d; FB: %d; FC: %d; FD: %d\n", Feedback_State[0], Feedback_State[1], Feedback_State[2], Feedback_State[3]);
+		printf("Feedback bit: %x\n", Feedback_Bit);
+		(Error_Flag==0) ? printf("Good\n") : printf("Failure\n");
 	}
 }
 
 
-void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan){		//Funkcja odbierająca dane z CAN
+//Funkcja odbierająca dane z CAN
+void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan){
 	HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO1, &RxHeader, RxData);
 	flag = 1;
 }
@@ -151,9 +202,14 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_CAN_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO1_MSG_PENDING);		//Callback na przychodzącą wiadomość po CAN
+  //Uruchomienie diody sprawdzajacej czy kontroler poprawnie dziala
+  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+
+  //Callback na przychodzącą wiadomość po CAN
+  HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO1_MSG_PENDING);
 
   /* USER CODE END 2 */
 
@@ -163,8 +219,7 @@ int main(void)
   {
 	  if (flag == 1){
 		  flag = 0;
-		  switch(RxHeader.StdId){
-		  case PDU_ADD:
+		  if(RxHeader.StdId==PDU_ADD){
 			  switch(RxData[0]){
 			  case DISCHARGE:
 				  Discharge();
@@ -178,21 +233,16 @@ int main(void)
 			  default:
 				  break;
 			  }
-			  break;
-
-          default:
-			  break;
 		  }
 	  }
-
-
-
-	  }
+	  Error_Flag = ReadFeedback();
+  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+
   /* USER CODE END 3 */
+}
 
 /**
   * @brief System Clock Configuration
@@ -286,6 +336,39 @@ static void MX_CAN_Init(void)
 }
 
 /**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -298,14 +381,14 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, SD_Pin|SC_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOA, LD2_Pin|SB_Pin|SA_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, SB_Pin|SA_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, SD_Pin|SC_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
@@ -313,19 +396,25 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : SD_Pin SC_Pin */
-  GPIO_InitStruct.Pin = SD_Pin|SC_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : SB_Pin SA_Pin */
-  GPIO_InitStruct.Pin = SB_Pin|SA_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  /*Configure GPIO pins : LD2_Pin SB_Pin SA_Pin */
+  GPIO_InitStruct.Pin = LD2_Pin|SB_Pin|SA_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : FD_Pin FA_Pin FC_Pin FB_Pin */
+  GPIO_InitStruct.Pin = FD_Pin|FA_Pin|FC_Pin|FB_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : SD_Pin SC_Pin */
+  GPIO_InitStruct.Pin = SD_Pin|SC_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
